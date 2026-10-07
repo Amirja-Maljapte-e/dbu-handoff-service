@@ -1,0 +1,508 @@
+{
+  "info": {
+    "name": "DBU Handoff Service — local",
+    "description": "Drives the handoff service running on localhost with both vendors replaced by the logging stand-ins (handoff.vendors.mode=logging). Nothing leaves the machine.\n\nRun the requests in order. Set logging.level.com.dbu.handoff=DEBUG in application.properties first, or the stand-ins' output is invisible.\n\nThe webhook requests sign themselves in a pre-request script. The signature is sha256= plus the BASE64 HMAC-SHA256 of the raw body, which is what GenesysSignatureVerifier checks and what the Genesys team's own collection produces.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "webhookSecret",
+      "value": "local-dev-secret",
+      "description": "Must match handoff.genesys.webhook-secret in application.properties."
+    },
+    {
+      "key": "customerId",
+      "value": "BLG-CUST-8812",
+      "description": "Change this to start a clean journey — one open handoff per customer is enforced by the database."
+    },
+    {
+      "key": "conversationId",
+      "value": "EL-LOCAL-001"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/actuator/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "actuator",
+            "health"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('service is up', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Escalate",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"elevenlabs_conversation_id\": \"{{conversationId}}\",\n  \"customer_id\": \"{{customerId}}\",\n  \"resident_name\": \"Asha Menon\",\n  \"mobile\": \"+971500000000\",\n  \"email\": \"asha.menon@example.com\",\n  \"escalation_reason\": \"Customer asked for a person\",\n  \"conversation_summary\": \"Resident queried the March service charge and asked to speak to someone.\",\n  \"agent_turn\": 3\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/v1/handoffs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "handoffs"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('accepted', () => pm.response.to.have.status(202));",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('a journey was created', () => pm.expect(body.chat_journey_id).to.be.a('string'));",
+              "pm.test('a handoff was opened', () => pm.expect(body.handoff_id).to.be.a('string'));",
+              "",
+              "// QUEUED means the Genesys stand-in returned an interaction ID and the",
+              "// journey moved on from HANDOFF_REQUESTED.",
+              "pm.test('state is QUEUED or HANDOFF_REQUESTED', () =>",
+              "    pm.expect(body.state).to.be.oneOf(['QUEUED', 'HANDOFF_REQUESTED']));",
+              "",
+              "pm.collectionVariables.set('chatJourneyId', body.chat_journey_id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Escalate again — suppressed as duplicate",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"elevenlabs_conversation_id\": \"{{conversationId}}\",\n  \"customer_id\": \"{{customerId}}\",\n  \"resident_name\": \"Asha Menon\",\n  \"mobile\": \"+971500000000\",\n  \"email\": \"asha.menon@example.com\",\n  \"escalation_reason\": \"Customer asked for a person\",\n  \"conversation_summary\": \"Resident queried the March service charge and asked to speak to someone.\",\n  \"agent_turn\": 3\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/v1/handoffs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "handoffs"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Identical body, so the delivery key is identical: EL-LOCAL-001:turn-3.",
+              "// The ledger suppresses it and the existing journey comes back unchanged.",
+              "pm.test('still accepted', () => pm.response.to.have.status(202));",
+              "",
+              "pm.test('same journey, no second handoff', () =>",
+              "    pm.expect(pm.response.json().chat_journey_id)",
+              "      .to.eql(pm.collectionVariables.get('chatJourneyId')));",
+              "",
+              "// Check the log for: duplicate escalation for conversation ... — ignoring"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Agent replies",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"gen-delivery-0001\",\n  \"channel\": {\n    \"id\": \"a1b2c3d4-0000-0000-0000-000000000000\",\n    \"platform\": \"Open\",\n    \"messageId\": \"gen-msg-0001\",\n    \"time\": \"2026-10-07T09:20:00.000Z\",\n    \"to\": {\n      \"id\": \"{{customerId}}\",\n      \"idType\": \"Opaque\"\n    },\n    \"from\": {\n      \"id\": \"agent-7741\",\n      \"idType\": \"Opaque\",\n      \"nickname\": \"Sara\"\n    }\n  },\n  \"type\": \"Text\",\n  \"text\": \"Hello, this is Sara from the DBU team. I can see the March charge now.\",\n  \"direction\": \"Outbound\",\n  \"originatingEntity\": \"Human\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/genesys/webhook",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "genesys",
+            "webhook"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Signs the request body exactly as Genesys does.",
+              "//",
+              "// sha256= followed by the BASE64 (not hex) HMAC-SHA256 of the raw body.",
+              "//",
+              "// replaceIn() is important: it resolves {{variables}} to the text Postman",
+              "// will actually send. Signing the unresolved template would produce a",
+              "// signature for a body that never goes on the wire, and the service would",
+              "// reject it — which is the same failure as a tampered payload.",
+              "const raw = pm.variables.replaceIn(pm.request.body.raw);",
+              "const secret = pm.variables.replaceIn('{{webhookSecret}}');",
+              "",
+              "const digest = CryptoJS.HmacSHA256(raw, secret);",
+              "const signature = 'sha256=' + CryptoJS.enc.Base64.stringify(digest);",
+              "",
+              "pm.request.headers.upsert({ key: 'X-Hub-Signature-256', value: signature });",
+              "console.log('X-Hub-Signature-256: ' + signature);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('accepted', () => pm.response.to.have.status(200));",
+              "",
+              "// In the log, the ElevenLabs stand-in relaying the agent's text into",
+              "// the customer's chat."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Same delivery again — suppressed",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"gen-delivery-0001\",\n  \"channel\": {\n    \"id\": \"a1b2c3d4-0000-0000-0000-000000000000\",\n    \"platform\": \"Open\",\n    \"messageId\": \"gen-msg-0001\",\n    \"time\": \"2026-10-07T09:20:00.000Z\",\n    \"to\": {\n      \"id\": \"{{customerId}}\",\n      \"idType\": \"Opaque\"\n    },\n    \"from\": {\n      \"id\": \"agent-7741\",\n      \"idType\": \"Opaque\",\n      \"nickname\": \"Sara\"\n    }\n  },\n  \"type\": \"Text\",\n  \"text\": \"Hello, this is Sara from the DBU team. I can see the March charge now.\",\n  \"direction\": \"Outbound\",\n  \"originatingEntity\": \"Human\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/genesys/webhook",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "genesys",
+            "webhook"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Signs the request body exactly as Genesys does.",
+              "//",
+              "// sha256= followed by the BASE64 (not hex) HMAC-SHA256 of the raw body.",
+              "//",
+              "// replaceIn() is important: it resolves {{variables}} to the text Postman",
+              "// will actually send. Signing the unresolved template would produce a",
+              "// signature for a body that never goes on the wire, and the service would",
+              "// reject it — which is the same failure as a tampered payload.",
+              "const raw = pm.variables.replaceIn(pm.request.body.raw);",
+              "const secret = pm.variables.replaceIn('{{webhookSecret}}');",
+              "",
+              "const digest = CryptoJS.HmacSHA256(raw, secret);",
+              "const signature = 'sha256=' + CryptoJS.enc.Base64.stringify(digest);",
+              "",
+              "pm.request.headers.upsert({ key: 'X-Hub-Signature-256', value: signature });",
+              "console.log('X-Hub-Signature-256: ' + signature);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Genesys delivers at least once, so a repeat is normal traffic rather",
+              "// than an error. Acknowledged, not processed.",
+              "pm.test('acknowledged', () => pm.response.to.have.status(200));",
+              "",
+              "// Check the log for: duplicate Genesys delivery gen-delivery-0001 — ignoring",
+              "// and confirm no second relay to ElevenLabs."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Bot message — accepted and ignored",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"gen-delivery-0002\",\n  \"channel\": {\n    \"id\": \"a1b2c3d4-0000-0000-0000-000000000000\",\n    \"platform\": \"Open\",\n    \"messageId\": \"gen-msg-0002\",\n    \"time\": \"2026-10-07T09:20:00.000Z\",\n    \"to\": {\n      \"id\": \"{{customerId}}\",\n      \"idType\": \"Opaque\"\n    },\n    \"from\": {\n      \"id\": \"agent-7741\",\n      \"idType\": \"Opaque\",\n      \"nickname\": \"Sara\"\n    }\n  },\n  \"type\": \"Text\",\n  \"text\": \"Thanks for contacting us. An agent will be with you shortly.\",\n  \"direction\": \"Outbound\",\n  \"originatingEntity\": \"Bot\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/genesys/webhook",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "genesys",
+            "webhook"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Signs the request body exactly as Genesys does.",
+              "//",
+              "// sha256= followed by the BASE64 (not hex) HMAC-SHA256 of the raw body.",
+              "//",
+              "// replaceIn() is important: it resolves {{variables}} to the text Postman",
+              "// will actually send. Signing the unresolved template would produce a",
+              "// signature for a body that never goes on the wire, and the service would",
+              "// reject it — which is the same failure as a tampered payload.",
+              "const raw = pm.variables.replaceIn(pm.request.body.raw);",
+              "const secret = pm.variables.replaceIn('{{webhookSecret}}');",
+              "",
+              "const digest = CryptoJS.HmacSHA256(raw, secret);",
+              "const signature = 'sha256=' + CryptoJS.enc.Base64.stringify(digest);",
+              "",
+              "pm.request.headers.upsert({ key: 'X-Hub-Signature-256', value: signature });",
+              "console.log('X-Hub-Signature-256: ' + signature);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// An Architect flow sends its own text. Relaying it would duplicate what",
+              "// the AI already said, so only Human messages are passed through.",
+              "pm.test('acknowledged', () => pm.response.to.have.status(200));",
+              "",
+              "// Check the log: no relay for this one."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Unknown customer — acknowledged, nothing to do",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"gen-delivery-0003\",\n  \"channel\": {\n    \"id\": \"a1b2c3d4-0000-0000-0000-000000000000\",\n    \"platform\": \"Open\",\n    \"messageId\": \"gen-msg-0003\",\n    \"time\": \"2026-10-07T09:20:00.000Z\",\n    \"to\": {\n      \"id\": \"BLG-CUST-NOBODY\",\n      \"idType\": \"Opaque\"\n    },\n    \"from\": {\n      \"id\": \"agent-7741\",\n      \"idType\": \"Opaque\",\n      \"nickname\": \"Sara\"\n    }\n  },\n  \"type\": \"Text\",\n  \"text\": \"Are you still there?\",\n  \"direction\": \"Outbound\",\n  \"originatingEntity\": \"Human\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/genesys/webhook",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "genesys",
+            "webhook"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Signs the request body exactly as Genesys does.",
+              "//",
+              "// sha256= followed by the BASE64 (not hex) HMAC-SHA256 of the raw body.",
+              "//",
+              "// replaceIn() is important: it resolves {{variables}} to the text Postman",
+              "// will actually send. Signing the unresolved template would produce a",
+              "// signature for a body that never goes on the wire, and the service would",
+              "// reject it — which is the same failure as a tampered payload.",
+              "const raw = pm.variables.replaceIn(pm.request.body.raw);",
+              "const secret = pm.variables.replaceIn('{{webhookSecret}}');",
+              "",
+              "const digest = CryptoJS.HmacSHA256(raw, secret);",
+              "const signature = 'sha256=' + CryptoJS.enc.Base64.stringify(digest);",
+              "",
+              "pm.request.headers.upsert({ key: 'X-Hub-Signature-256', value: signature });",
+              "console.log('X-Hub-Signature-256: ' + signature);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A webhook is never rejected for something the service cannot resolve —",
+              "// Genesys would retry it forever. Acknowledged with a warning in the log.",
+              "pm.test('acknowledged', () => pm.response.to.have.status(200));",
+              "",
+              "// Check the log for: no active handoff for customer BLG-CUST-NOBODY"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Wrong secret — rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"gen-delivery-0004\",\n  \"channel\": {\n    \"id\": \"a1b2c3d4-0000-0000-0000-000000000000\",\n    \"platform\": \"Open\",\n    \"messageId\": \"gen-msg-0004\",\n    \"time\": \"2026-10-07T09:20:00.000Z\",\n    \"to\": {\n      \"id\": \"{{customerId}}\",\n      \"idType\": \"Opaque\"\n    },\n    \"from\": {\n      \"id\": \"agent-7741\",\n      \"idType\": \"Opaque\",\n      \"nickname\": \"Sara\"\n    }\n  },\n  \"type\": \"Text\",\n  \"text\": \"This should never reach the customer.\",\n  \"direction\": \"Outbound\",\n  \"originatingEntity\": \"Human\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/genesys/webhook",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "genesys",
+            "webhook"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Signs the request body exactly as Genesys does.",
+              "//",
+              "// sha256= followed by the BASE64 (not hex) HMAC-SHA256 of the raw body.",
+              "//",
+              "// replaceIn() is important: it resolves {{variables}} to the text Postman",
+              "// will actually send. Signing the unresolved template would produce a",
+              "// signature for a body that never goes on the wire, and the service would",
+              "// reject it — which is the same failure as a tampered payload.",
+              "const raw = pm.variables.replaceIn(pm.request.body.raw);",
+              "const secret = 'definitely-not-the-secret';",
+              "",
+              "const digest = CryptoJS.HmacSHA256(raw, secret);",
+              "const signature = 'sha256=' + CryptoJS.enc.Base64.stringify(digest);",
+              "",
+              "pm.request.headers.upsert({ key: 'X-Hub-Signature-256', value: signature });",
+              "console.log('X-Hub-Signature-256: ' + signature);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// The signature is checked before the body is parsed, so a forged or",
+              "// tampered delivery never reaches the domain.",
+              "pm.test('rejected', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

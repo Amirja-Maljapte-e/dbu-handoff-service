@@ -1,0 +1,48 @@
+# Local stack.
+#
+#   docker compose up -d postgres        # dependencies only, run the app from the IDE
+#   docker compose up --build            # everything, including the service
+#
+# Nothing here requires a cloud account or vendor credentials. The service runs
+# with logging stand-ins for ElevenLabs and Genesys.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: handoff
+      POSTGRES_USER: handoff
+      POSTGRES_PASSWORD: handoff
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U handoff"]
+      interval: 5s
+      retries: 10
+
+  # Not used while handoff.coordination.mode=memory. Started anyway so the
+  # switch to redis needs no change here.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  handoff-service:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # Host names come from the compose network, not localhost.
+      DB_URL: jdbc:postgresql://postgres:5432/handoff
+      DB_USERNAME: handoff
+      DB_PASSWORD: handoff
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Graceful shutdown releases socket ownership. The default 10 seconds is
+    # not enough once real sockets are held.
+    stop_grace_period: 60s

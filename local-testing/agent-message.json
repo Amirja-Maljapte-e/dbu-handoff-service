@@ -1,0 +1,22 @@
+{
+  "id": "gen-delivery-0001",
+  "channel": {
+    "id": "a1b2c3d4-0000-0000-0000-000000000000",
+    "platform": "Open",
+    "messageId": "gen-msg-0001",
+    "time": "2026-10-07T09:20:00.000Z",
+    "to": {
+      "id": "BLG-CUST-8812",
+      "idType": "Opaque"
+    },
+    "from": {
+      "id": "agent-7741",
+      "idType": "Opaque",
+      "nickname": "Sara"
+    }
+  },
+  "type": "Text",
+  "text": "Hello, this is Sara from the DBU team. I can see the March charge now.",
+  "direction": "Outbound",
+  "originatingEntity": "Human"
+}

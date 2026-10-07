@@ -1,0 +1,13 @@
+# Keep the build context small and keep local state out of the image.
+target/
+.git/
+.gitignore
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Documentation and local tooling are not needed to build the service.
+README.md
+docker-compose.yml
+*.md

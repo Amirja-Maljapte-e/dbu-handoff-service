@@ -1,0 +1,10 @@
+{
+  "elevenlabs_conversation_id": "EL-LOCAL-001",
+  "customer_id": "BLG-CUST-8812",
+  "resident_name": "Asha Menon",
+  "mobile": "+971500000000",
+  "email": "asha.menon@example.com",
+  "escalation_reason": "Customer asked for a person",
+  "conversation_summary": "Resident queried the March service charge and asked to speak to someone.",
+  "agent_turn": 3
+}
